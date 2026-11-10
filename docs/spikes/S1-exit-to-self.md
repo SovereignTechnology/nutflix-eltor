@@ -4,6 +4,9 @@
 - **Question:** does a SOCKS stream to the seeder's own IP:port attach to the pinned paid circuit
   `[guard, middle, seeder]`, where the seeder's exit policy accepts only that address?
 - **Kills the design if:** it cannot attach, even when we attach streams ourselves (`ATTACHSTREAM`).
+- **Prior evidence (lab owner, 2026-11-10):** narrowing the lab exits' policy to the origin left the client with no
+  usable exit. S1 must tell apart Tor's own path selection (expected to fail) and an explicit Foundation plan pinning
+  the exit (the case we need). Watch for el-tor/eltor#11 (tor relaunching unbuildable circuits every second).
 
 ## Setup
 
