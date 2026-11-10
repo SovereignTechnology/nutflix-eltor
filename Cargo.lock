@@ -262,6 +262,17 @@ version = "0.0.1"
 dependencies = [
  "hex",
  "nfx-proto",
+ "serde_json",
+]
+
+[[package]]
+name = "nfe-watch"
+version = "0.0.1"
+dependencies = [
+ "hex",
+ "nfe-catalog",
+ "nfe-seed",
+ "nfx-proto",
  "thiserror",
 ]
 
@@ -324,6 +335,7 @@ dependencies = [
  "nfe-catalog",
  "nfe-eltor",
  "nfe-seed",
+ "nfe-watch",
  "nfx-media",
  "nfx-proto",
  "serde_json",

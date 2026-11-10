@@ -1,0 +1,19 @@
+[package]
+name = "nfe-watch"
+description = "nutflix-eltor viewer: SOCKS5 to El Tor, paced and hash-checked fetching, the local HLS proxy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+nfe-catalog.workspace = true
+nfe-seed.workspace = true
+nfx-proto.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

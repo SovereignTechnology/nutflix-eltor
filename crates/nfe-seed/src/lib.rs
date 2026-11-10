@@ -1,282 +1,282 @@
-//! The seeder's content origin (ADR 0001 section 1).
+//! The seeder's content origin (ADR 0001 section 1), plus the HTTP pieces the viewer's local proxy shares.
 //!
-//! A small HTTP/1.1 server that the seeder relay's exit-to-self policy points at. It answers exactly two kinds of
-//! request and nothing else:
+//! The origin answers the NFX-05 §6 surface ([`route`]) and `/catalog.json` from a content-addressed store, and
+//! nothing else. Every file is checked against its sha256 before it is sent (the "Blossom rule": a corrupt store
+//! never serves a wrong byte), and symlinks in the store are refused. It binds wherever it is told; the seeder binds
+//! it where only its own relay's exit can reach it (loopback in the lab).
 //!
-//! - `GET /catalog.json`: the signed catalog (nfe-catalog);
-//! - `GET /<sha256>` (64 lowercase hex): a content-addressed file from the store (NFX-05 §6 shape), checked against
-//!   its name before it is sent (the "Blossom rule": a corrupt store never serves a wrong byte).
-//!
-//! `HEAD` is answered like `GET` without a body. Every response closes the connection. Requests are bounded (head
-//! 8 KiB, 10 s read timeout) and so are connections ([`MAX_CONNECTIONS`]). It binds wherever it is told; the
-//! seeder binds it where only its own relay's exit can reach it (loopback in the lab).
+//! Because the surface is NFX-05 §6, any NFX origin client can read from it (issue #1).
 
-use std::io::{self, BufRead, BufReader, Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+pub mod route;
+pub mod server;
+
+use std::collections::HashMap;
+use std::io;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock};
-use std::thread;
-use std::time::Duration;
+use std::sync::{Arc, Mutex, RwLock};
 
-pub const MAX_CONNECTIONS: usize = 64;
-pub const MAX_HEAD: usize = 8 * 1024;
+use nfx_proto::hashlist::{HashList, Role};
+
+use route::{Route, content_type};
+use server::{Handler, Options, Response, Server, StopHandle};
+
 /// Largest file served (segments are a few MB; a 2-hour hash list is under 2 MB). Bounds memory per connection.
 pub const MAX_FILE: u64 = 16 * 1024 * 1024;
-const READ_TIMEOUT: Duration = Duration::from_secs(10);
-const WRITE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Parsed hash lists kept for `/<root>/…` requests.
+const HASH_LIST_CACHE: usize = 16;
 
-struct State {
-    store: PathBuf,
+struct Store {
+    dir: PathBuf,
     catalog: RwLock<Arc<Vec<u8>>>,
-    active: AtomicUsize,
-    stop: AtomicBool,
+    lists: Mutex<HashMap<String, Arc<HashList>>>,
 }
 
-pub struct Origin {
-    listener: TcpListener,
-    state: Arc<State>,
-}
-
-/// Controls a running origin from another thread.
-#[derive(Clone)]
-pub struct Handle {
-    state: Arc<State>,
-    addr: SocketAddr,
-}
-
-impl Origin {
-    pub fn bind(addr: SocketAddr, store: &Path, catalog: Vec<u8>) -> io::Result<Self> {
-        let store = store.canonicalize()?;
-        if !store.is_dir() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "store is not a directory"));
+impl Store {
+    fn hash_list(&self, root: &str) -> Option<Arc<HashList>> {
+        if let Some(l) = self.lists.lock().ok()?.get(root) {
+            return Some(Arc::clone(l));
         }
-        let listener = TcpListener::bind(addr)?;
-        let state = Arc::new(State {
-            store,
-            catalog: RwLock::new(Arc::new(catalog)),
-            active: AtomicUsize::new(0),
-            stop: AtomicBool::new(false),
-        });
-        Ok(Self { listener, state })
+        let list: HashList = serde_json::from_slice(&read_verified(&self.dir, root)?).ok()?;
+        let list = Arc::new(list);
+        let mut cache = self.lists.lock().ok()?;
+        if cache.len() >= HASH_LIST_CACHE {
+            cache.clear();
+        }
+        cache.insert(root.to_owned(), Arc::clone(&list));
+        Some(list)
     }
 
-    pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.listener.local_addr()
+    fn file(&self, sha256: &str, role: Option<Role>, ext: Option<&str>) -> Response {
+        match read_verified(&self.dir, sha256) {
+            Some(b) => Response::ok(content_type(role, ext), Arc::new(b), true),
+            None => Response::status(404),
+        }
     }
 
-    pub fn handle(&self) -> io::Result<Handle> {
-        Ok(Handle { state: Arc::clone(&self.state), addr: self.local_addr()? })
-    }
-
-    /// Accept until [`Handle::stop`]. One thread per connection, at most [`MAX_CONNECTIONS`] at once.
-    pub fn run(self) -> io::Result<()> {
-        for conn in self.listener.incoming() {
-            if self.state.stop.load(Ordering::SeqCst) {
-                break;
+    fn answer(&self, route: &Route) -> Response {
+        match route {
+            Route::Catalog => {
+                let body = self.catalog.read().map(|c| Arc::clone(&*c)).unwrap_or_default();
+                Response::ok("application/json", body, false)
             }
-            let Ok(stream) = conn else { continue };
-            if self.state.active.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
-                self.state.active.fetch_sub(1, Ordering::SeqCst);
-                // Never block the accept loop: a short best-effort reply, no drain.
-                let _ = stream.set_write_timeout(Some(Duration::from_millis(200)));
-                let _ = (&stream)
-                    .write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-                continue;
+            Route::File { sha256, ext } => self.file(sha256, None, ext.as_deref()),
+            Route::Master { root } => {
+                let Some(list) = self.hash_list(root) else { return Response::status(404) };
+                match list.files.iter().find(|f| f.role == Role::PlaylistMaster) {
+                    Some(f) => self.file(&f.sha256, Some(Role::PlaylistMaster), None),
+                    None => Response::status(404),
+                }
             }
-            let state = Arc::clone(&self.state);
-            thread::spawn(move || {
-                let _ = serve(&state, stream);
-                state.active.fetch_sub(1, Ordering::SeqCst);
-            });
+            Route::Listed { root, sha256, ext } => {
+                let Some(list) = self.hash_list(root) else { return Response::status(404) };
+                // NFX-05 §6: an origin MAY refuse hashes the named hash list does not contain; we do.
+                match list.files.iter().find(|f| &f.sha256 == sha256) {
+                    Some(f) => self.file(sha256, Some(f.role), Some(ext.as_str())),
+                    None => Response::status(404),
+                }
+            }
         }
-        Ok(())
     }
 }
 
-impl Handle {
-    pub fn set_catalog(&self, catalog: Vec<u8>) {
-        if let Ok(mut c) = self.state.catalog.write() {
-            *c = Arc::new(catalog);
-        }
-    }
-
-    pub fn stop(&self) {
-        self.state.stop.store(true, Ordering::SeqCst);
-        let _ = TcpStream::connect_timeout(&self.addr, Duration::from_secs(1)); // wake accept()
-    }
-}
-
-enum Target {
-    Catalog,
-    File(String),
-}
-
-fn parse_request_line(line: &str) -> Result<(bool, Option<Target>), u16> {
-    let mut parts = line.split(' ');
-    let (Some(method), Some(path), Some(version), None) = (parts.next(), parts.next(), parts.next(), parts.next())
-    else {
-        return Err(400);
-    };
-    if version != "HTTP/1.1" && version != "HTTP/1.0" {
-        return Err(400);
-    }
-    let head = match method {
-        "GET" => false,
-        "HEAD" => true,
-        _ => return Err(405),
-    };
-    let target = match path {
-        "/catalog.json" => Some(Target::Catalog),
-        p => p
-            .strip_prefix('/')
-            .filter(|n| n.len() == 64 && n.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
-            .map(|n| Target::File(n.to_owned())),
-    };
-    Ok((head, target))
-}
-
-fn serve(state: &State, stream: TcpStream) -> io::Result<()> {
-    stream.set_read_timeout(Some(READ_TIMEOUT))?;
-    stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
-    let mut reader = BufReader::new((&stream).take(MAX_HEAD as u64));
-    let mut line = String::new();
-    if reader.read_line(&mut line)? == 0 || !line.ends_with('\n') {
-        return respond(&stream, 400, "text/plain", b"bad request\n", false, false);
-    }
-    // Drain the header block (bounded by MAX_HEAD through `take`); its contents are not needed.
-    loop {
-        let mut h = String::new();
-        let n = reader.read_line(&mut h)?;
-        if n == 0 || !h.ends_with('\n') {
-            return respond(&stream, 431, "text/plain", b"header too large or truncated\n", false, false);
-        }
-        if h == "\r\n" || h == "\n" {
-            break;
-        }
-    }
-    let (head, target) = match parse_request_line(line.trim_end_matches(['\r', '\n'])) {
-        Ok(v) => v,
-        Err(code) => return respond(&stream, code, "text/plain", b"bad request\n", false, false),
-    };
-    match target {
-        None => respond(&stream, 404, "text/plain", b"not found\n", head, false),
-        Some(Target::Catalog) => {
-            let body = state.catalog.read().map(|c| Arc::clone(&*c)).unwrap_or_default();
-            respond(&stream, 200, "application/json", &body, head, false)
-        }
-        Some(Target::File(name)) => match read_verified(&state.store, &name) {
-            Some(body) => respond(&stream, 200, "application/octet-stream", &body, head, true),
-            None => respond(&stream, 404, "text/plain", b"not found\n", head, false),
-        },
-    }
-}
-
-/// The store file named `name`, only if it is a regular file (not a symlink) whose sha256 equals its name.
-fn read_verified(store: &Path, name: &str) -> Option<Vec<u8>> {
-    let path = store.join(name);
+/// The store file named `sha256`, only if it is a regular file (not a symlink) whose sha256 is its name.
+pub fn read_verified(dir: &Path, sha256: &str) -> Option<Vec<u8>> {
+    let path = dir.join(sha256);
     let meta = std::fs::symlink_metadata(&path).ok()?;
     if !meta.is_file() || meta.len() > MAX_FILE {
         return None;
     }
     let bytes = std::fs::read(&path).ok()?;
-    nfx_proto::hashlist::verify_file(name, &bytes).ok()?;
+    nfx_proto::hashlist::verify_file(sha256, &bytes).ok()?;
     Some(bytes)
 }
 
-fn respond(mut s: &TcpStream, code: u16, ctype: &str, body: &[u8], head: bool, immutable: bool) -> io::Result<()> {
-    let reason = match code {
-        200 => "OK",
-        400 => "Bad Request",
-        404 => "Not Found",
-        405 => "Method Not Allowed",
-        431 => "Request Header Fields Too Large",
-        _ => "Service Unavailable",
-    };
-    let cache = if immutable { "public, max-age=31536000, immutable" } else { "no-store" };
-    let mut out = format!(
-        "HTTP/1.1 {code} {reason}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: {cache}\r\n\
-         X-Content-Type-Options: nosniff\r\nConnection: close\r\n",
-        body.len()
-    );
-    if code == 405 {
-        out.push_str("Allow: GET, HEAD\r\n");
-    }
-    out.push_str("\r\n");
-    s.write_all(out.as_bytes())?;
-    if !head {
-        s.write_all(body)?;
-    }
-    s.flush()?;
-    if code != 200 {
-        drain(s);
-    }
-    Ok(())
+pub struct Origin {
+    server: Server,
+    store: Arc<Store>,
 }
 
-/// After an error reply the client may still be sending; closing with unread input makes the kernel send a reset
-/// that can destroy the reply in flight. Half-close, then discard a bounded amount for a short while.
-fn drain(s: &TcpStream) {
-    let _ = s.shutdown(std::net::Shutdown::Write);
-    let _ = s.set_read_timeout(Some(Duration::from_millis(500)));
-    let _ = io::copy(&mut s.take(64 * 1024), &mut io::sink());
+/// Controls a running origin from another thread.
+#[derive(Clone)]
+pub struct Handle {
+    store: Arc<Store>,
+    stop: StopHandle,
+}
+
+impl Origin {
+    pub fn bind(addr: SocketAddr, store: &Path, catalog: Vec<u8>) -> io::Result<Self> {
+        let dir = store.canonicalize()?;
+        if !dir.is_dir() {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "store is not a directory"));
+        }
+        let store = Arc::new(Store { dir, catalog: RwLock::new(Arc::new(catalog)), lists: Mutex::new(HashMap::new()) });
+        let s = Arc::clone(&store);
+        let handler: Handler = Arc::new(move |route| s.answer(route));
+        Ok(Self { server: Server::bind(addr, handler, Options::ORIGIN)?, store })
+    }
+
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.server.local_addr()
+    }
+
+    pub fn handle(&self) -> io::Result<Handle> {
+        Ok(Handle { store: Arc::clone(&self.store), stop: self.server.stop_handle()? })
+    }
+
+    pub fn run(self) -> io::Result<()> {
+        self.server.run()
+    }
+}
+
+impl Handle {
+    pub fn set_catalog(&self, catalog: Vec<u8>) {
+        if let Ok(mut c) = self.store.catalog.write() {
+            *c = Arc::new(catalog);
+        }
+    }
+
+    pub fn stop(&self) {
+        self.stop.stop();
+    }
+}
+
+/// Test fixtures shared with the viewer's tests: a small store holding a valid one-rendition hash list.
+#[doc(hidden)]
+pub mod fixture {
+    use super::*;
+    use nfx_proto::hashlist::{FileEntry, Rendition};
+
+    pub const VIDEO: &str = "nfx:eltor:1:video-a";
+
+    pub fn put(dir: &Path, bytes: &[u8]) -> String {
+        let name = hex::encode(nfx_proto::sha256(bytes));
+        std::fs::write(dir.join(&name), bytes).expect("write fixture");
+        name
+    }
+
+    pub struct Fixture {
+        pub root: String,
+        pub list: HashList,
+        pub master: String,
+        pub playlist: String,
+        pub init: String,
+        pub segs: Vec<String>,
+    }
+
+    /// Write a store with `n_segs` segments of `seg_len` bytes each, and its hash list.
+    pub fn store(dir: &Path, n_segs: usize, seg_len: usize) -> Fixture {
+        std::fs::create_dir_all(dir).expect("fixture dir");
+        let init = put(dir, b"init bytes");
+        let segs: Vec<String> = (0..n_segs)
+            .map(|i| {
+                let mut b = vec![u8::try_from(i % 251).unwrap_or(0); seg_len];
+                b[..8].copy_from_slice(&(i as u64).to_be_bytes());
+                put(dir, &b)
+            })
+            .collect();
+        let mut pl = format!("#EXTM3U\n#EXT-X-MAP:URI=\"{init}.mp4\"\n");
+        for s in &segs {
+            pl.push_str(&format!("#EXTINF:2.000,\n{s}.m4s\n"));
+        }
+        let playlist = put(dir, pl.as_bytes());
+        let master = put(dir, format!("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000\n{playlist}.m3u8\n").as_bytes());
+        let entry = |name: String, role, sha: &str, size: usize, dur_ms| FileEntry {
+            name,
+            role,
+            sha256: sha.into(),
+            size: size as u64,
+            dur_ms,
+        };
+        let mut files = vec![
+            entry("master.m3u8".into(), Role::PlaylistMaster, &master, 0, None),
+            entry("360p.m3u8".into(), Role::Playlist, &playlist, pl.len(), None),
+            entry("360p/init.mp4".into(), Role::Init, &init, 10, None),
+        ];
+        for (i, s) in segs.iter().enumerate() {
+            files.push(entry(format!("360p/{i}.m4s"), Role::Segment, s, seg_len, Some(2000)));
+        }
+        let master_len = std::fs::metadata(dir.join(&master)).map(|m| m.len()).unwrap_or(0);
+        files[0].size = master_len;
+        let list = HashList {
+            v: 1,
+            video: VIDEO.into(),
+            files,
+            renditions: vec![Rendition {
+                id: "360p".into(),
+                playlist: "360p.m3u8".into(),
+                bandwidth: 800_000,
+                codecs: None,
+                resolution: Some("640x360".into()),
+            }],
+        };
+        let root = put(dir, &list.render());
+        Fixture { root, list, master, playlist, init, segs }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::fixture::{put, store};
+    use super::server::testing::{fetch, get};
     use super::*;
-    use std::net::Shutdown;
-
-    fn fetch(addr: SocketAddr, raw: &str) -> (u16, Vec<u8>) {
-        let mut s = TcpStream::connect(addr).unwrap();
-        s.write_all(raw.as_bytes()).unwrap();
-        let _ = s.shutdown(Shutdown::Write);
-        let mut buf = Vec::new();
-        s.read_to_end(&mut buf).unwrap();
-        let split = buf.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
-        let status: u16 = std::str::from_utf8(&buf[9..12]).unwrap().parse().unwrap();
-        (status, buf[split + 4..].to_vec())
-    }
-
-    fn get(addr: SocketAddr, path: &str) -> (u16, Vec<u8>) {
-        fetch(addr, &format!("GET {path} HTTP/1.1\r\nHost: x\r\n\r\n"))
-    }
+    use std::thread;
 
     #[test]
-    fn serves_catalog_and_verified_files_only() {
+    fn nfx_05_origin_surface() {
         let dir = std::env::temp_dir().join(format!("nfe-seed-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let good = b"segment bytes".to_vec();
-        let good_name = hex::encode(nfx_proto::sha256(&good));
-        std::fs::write(dir.join(&good_name), &good).unwrap();
-        let bad_name = hex::encode(nfx_proto::sha256(b"something else"));
-        std::fs::write(dir.join(&bad_name), b"corrupted").unwrap();
+        let fx = store(&dir, 2, 100);
+        let (seg, root) = (&fx.segs[0], &fx.root);
+        let bad = hex::encode(nfx_proto::sha256(b"something else"));
+        std::fs::write(dir.join(&bad), b"corrupted").unwrap();
         std::fs::write(dir.join("secret.txt"), b"no").unwrap();
+        let _ = put(&dir, b"not a hash list");
 
         let origin = Origin::bind("127.0.0.1:0".parse().unwrap(), &dir, b"{\"v\":0}".to_vec()).unwrap();
         let addr = origin.local_addr().unwrap();
         let h = origin.handle().unwrap();
         let t = thread::spawn(move || origin.run());
 
-        assert_eq!(get(addr, "/catalog.json"), (200, b"{\"v\":0}".to_vec()));
-        assert_eq!(get(addr, &format!("/{good_name}")), (200, good.clone()));
-        assert_eq!(get(addr, &format!("/{bad_name}")).0, 404, "a corrupt file is never served");
+        let (code, headers, body) = get(addr, "/catalog.json");
+        assert_eq!((code, body), (200, b"{\"v\":0}".to_vec()));
+        assert!(headers.contains("Cache-Control: no-store"));
+        let (code, headers, body) = get(addr, &format!("/{seg}"));
+        assert_eq!((code, body.len()), (200, 100));
+        assert!(headers.contains("immutable") && headers.contains("Access-Control-Allow-Origin: *"));
+        let (code, headers, _) = get(addr, &format!("/{seg}.m4s"));
+        assert!(code == 200 && headers.contains("video/iso.segment"));
+        assert_eq!(get(addr, &format!("/{root}")).2, fx.list.render());
+        let (code, headers, body) = get(addr, &format!("/{root}/master.m3u8"));
+        assert!(code == 200 && headers.contains("mpegurl"));
+        assert_eq!(body, std::fs::read(dir.join(&fx.master)).unwrap());
+        let (code, headers, _) = get(addr, &format!("/{root}/{}.mp4", fx.init));
+        assert!(code == 200 && headers.contains("Content-Type: video/mp4"));
+        assert_eq!(get(addr, &format!("/{root}/{bad}.m4s")).0, 404, "not in that hash list");
+        assert_eq!(get(addr, &format!("/{bad}")).0, 404, "a corrupt file is never served");
+        assert_eq!(get(addr, &format!("/{seg}/master.m3u8")).0, 404, "not a hash list");
         assert_eq!(get(addr, "/secret.txt").0, 404);
-        assert_eq!(get(addr, "/../etc/passwd").0, 404);
-        assert_eq!(get(addr, &format!("/{}", good_name.to_uppercase())).0, 404);
-        assert_eq!(get(addr, &format!("/{good_name}?x=1")).0, 404);
-        assert_eq!(get(addr, "/").0, 404);
-        let (code, body) = fetch(addr, &format!("HEAD /{good_name} HTTP/1.1\r\n\r\n"));
-        assert_eq!((code, body.len()), (200, 0));
-        assert_eq!(fetch(addr, "POST /catalog.json HTTP/1.1\r\n\r\n").0, 405);
-        assert_eq!(fetch(addr, "GET /catalog.json HTTP/2\r\n\r\n").0, 400);
-        assert_eq!(fetch(addr, &format!("GET /catalog.json HTTP/1.1\r\nX: {}\r\n\r\n", "a".repeat(MAX_HEAD))).0, 431);
+        assert_eq!(get(addr, &format!("/../{seg}")).0, 404);
+        let (code, headers, body) = fetch(addr, &format!("HEAD /{seg} HTTP/1.1\r\n\r\n"));
+        assert!(code == 200 && body.is_empty() && headers.contains("Content-Length: 100"));
 
         h.set_catalog(b"{\"v\":1}".to_vec());
-        assert_eq!(get(addr, "/catalog.json").1, b"{\"v\":1}".to_vec());
-
+        assert_eq!(get(addr, "/catalog.json").2, b"{\"v\":1}".to_vec());
         h.stop();
         t.join().unwrap().unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn fixture_hash_list_verifies() {
+        let dir = std::env::temp_dir().join(format!("nfe-seed-fx-{}", std::process::id()));
+        let fx = store(&dir, 3, 64);
+        let bytes = std::fs::read(dir.join(&fx.root)).unwrap();
+        let mut root = [0u8; 32];
+        hex::decode_to_slice(&fx.root, &mut root).unwrap();
+        let addr = nfx_proto::namespace::VideoAddr::parse(fixture::VIDEO).unwrap();
+        HashList::verify(&bytes, &root, &addr, fx.list.files.len() as u64).unwrap();
+        let pl = std::fs::read(dir.join(&fx.playlist)).unwrap();
+        fx.list.check_playlist(&pl).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

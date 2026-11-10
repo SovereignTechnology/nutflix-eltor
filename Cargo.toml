@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/nfe-catalog", "crates/nfe-eltor", "crates/nfe-seed", "crates/nutflix-eltor"]
+members = ["crates/nfe-catalog", "crates/nfe-eltor", "crates/nfe-seed", "crates/nfe-watch", "crates/nutflix-eltor"]
 
 [workspace.package]
 version = "0.0.1"
@@ -13,6 +13,7 @@ repository = "https://gitworkshop.dev/npub1s0vtechh66tx7vrwdud8zfyheu9zca7swwfrz
 nfe-catalog = { path = "crates/nfe-catalog" }
 nfe-eltor = { path = "crates/nfe-eltor" }
 nfe-seed = { path = "crates/nfe-seed" }
+nfe-watch = { path = "crates/nfe-watch" }
 # NFX's wire formats and packager, pinned to a release tag (ADR 0001 section 3).
 nfx-proto = { git = "https://github.com/SovereignTechnology/nfx", tag = "v0.1.1" }
 nfx-media = { git = "https://github.com/SovereignTechnology/nfx", tag = "v0.1.1" }

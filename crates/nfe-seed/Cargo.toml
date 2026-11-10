@@ -1,6 +1,6 @@
 [package]
 name = "nfe-seed"
-description = "nutflix-eltor seeder: the loopback content origin (catalog and sha256-named files)"
+description = "nutflix-eltor seeder: the content origin (NFX-05 section 6 surface plus the catalog) and the shared HTTP server"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,7 +11,7 @@ publish = false
 [dependencies]
 nfx-proto.workspace = true
 hex.workspace = true
-thiserror.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

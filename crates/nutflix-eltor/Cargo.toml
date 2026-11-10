@@ -1,6 +1,6 @@
 [package]
 name = "nutflix-eltor"
-description = "nutflix-eltor: package, catalog, terms and serve (seed and watch come with the lab milestones)"
+description = "nutflix-eltor: package, catalog, terms, serve and watch (the El Tor controllers come with the lab milestones)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,6 +12,7 @@ publish = false
 nfe-catalog.workspace = true
 nfe-eltor.workspace = true
 nfe-seed.workspace = true
+nfe-watch.workspace = true
 nfx-media.workspace = true
 nfx-proto.workspace = true
 getrandom.workspace = true
