@@ -19,6 +19,9 @@ Cashu payment protocol) and uses El Tor for transport, payment and discovery. It
 
 ## Status (2026-11-10)
 
+**Shelved on 2026-11-10.** Resume at M0: the El Tor regtest lab is pinned (docs/spikes), and `lab/s1-exit-to-self.sh` is
+written but has not produced a verdict yet.
+
 Early. The architecture is in [ADR 0001](docs/decisions/0001-architecture.md), the catalog and seeder marker in
 [ADR 0002](docs/decisions/0002-catalog-v0.md), and the milestones in [docs/roadmap.md](docs/roadmap.md).
 
