@@ -15,8 +15,8 @@ Each record has:
 
 | Spike | Record | Verdict |
 |---|---|---|
-| S1 exit-to-self attach | not started | |
-| S2 quota at 0.9× and 1.1× | not started | |
-| S3 free-circuit freeloader | not started | |
-| S4 90-minute play, two scopes | not started | |
-| S5 onion catalog | not started | |
+| S1 exit-to-self attach | [S1](S1-exit-to-self.md) | planned |
+| S2 quota at 0.9× and 1.1× | [S2](S2-quota.md) | planned |
+| S3 free-circuit freeloader | [S3](S3-freeloader.md) | planned |
+| S4 90-minute play, two scopes | [S4](S4-long-play.md) | planned |
+| S5 onion catalog | [S5](S5-onion-catalog.md) | planned |
