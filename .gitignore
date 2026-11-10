@@ -1,0 +1,43 @@
+# --- Secrets: never commit these -------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials.json
+*.credentials
+# El Tor: control passwords, payment plans and wallet material
+torrc.local
+*.plan.json
+hidden_service/
+lightning-rpc
+
+# --- Lab state --------------------------------------------------------------
+/lab/state/
+/lab/out/
+
+# --- OS / editors -----------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# --- Logs & temp ------------------------------------------------------------
+*.log
+tmp/
+*.tmp
+
+# --- Rust -------------------------------------------------------------------
+/target/
+**/target/
+*.rs.bk
+
+# --- Media produced by the packager -----------------------------------------
+/media/
+*.mp4
+*.m4s
