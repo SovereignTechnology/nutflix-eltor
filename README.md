@@ -19,9 +19,14 @@ Cashu payment protocol) and uses El Tor for transport, payment and discovery. It
 
 ## Status (2026-11-10)
 
-Design stage. Nothing is built yet. The architecture is in
-[ADR 0001](docs/decisions/0001-architecture.md) and the milestones are in [docs/roadmap.md](docs/roadmap.md).
-The next step is M0: spikes in a local El Tor regtest lab that prove or kill the riskiest assumptions.
+Early. The architecture is in [ADR 0001](docs/decisions/0001-architecture.md), the catalog and seeder marker in
+[ADR 0002](docs/decisions/0002-catalog-v0.md), and the milestones in [docs/roadmap.md](docs/roadmap.md).
+
+Built so far, all without an El Tor network: packaging (NFX's `nfx-media`), catalog keys, signed catalogs and their
+binding to a relay, El Tor Foundation terms, the seeder's ContactInfo marker, client plans in eltord's format,
+per-minute prices and pacing budgets, and the seeder's content origin. `lab/smoke-seed.sh` packages a clip, signs a
+catalog, serves it and fetches every file back by hash. Driving El Tor itself (`seed`, `watch`) waits for M0's
+spikes in a local El Tor regtest lab.
 
 El Tor itself is pre-1.0. Its newer paid-circuit mode ("Foundation") runs only on test-mode networks today, and
 paid onion services are specified but not implemented. nutflix-eltor targets that mode and tracks the patches it
@@ -44,16 +49,16 @@ viewer: nutflix-eltor watch ──SOCKS──▶ El Tor client (Foundation plan:
 - **Discovery:** seeders mark their relay descriptor. Viewers list seeders from the El Tor directory and fetch each
   seeder's signed catalog over the paid circuit.
 
-## Repository layout (planned)
+## Repository layout
 
 | Path | What it is |
 |---|---|
-| `crates/nfe-catalog` | Catalog format, signing and verification, test vectors |
-| `crates/nfe-seed` | Seeder: relay controller, exit-to-self, content server |
-| `crates/nfe-watch` | Viewer: circuit plan, payment controller, paced segment fetcher, local HLS |
-| `crates/nutflix-eltor` | The one binary: `package`, `seed`, `watch`, `lab` |
-| `lab/` | Regtest lab scenarios (bitcoind regtest, Core Lightning, Chutney) |
-| `web/player` | A small hls.js page for the local player |
+| `crates/nfe-catalog` | Catalog v0: format, BIP-340 signing, verification, binding to a relay |
+| `crates/nfe-eltor` | El Tor glue: Foundation terms, the seeder marker, client plans, prices and pacing |
+| `crates/nfe-seed` | Seeder: the content origin (relay controller and exit-to-self come in M1) |
+| `crates/nfe-watch` | Viewer (M2, not yet): payment controller, paced segment fetcher, local HLS |
+| `crates/nutflix-eltor` | The binary: `package`, `key`, `catalog`, `terms`, `marker`, `price`, `serve` (`seed`, `watch` later) |
+| `lab/` | Lab tools: terms encoder (Python), seeder smoke test, later the regtest scenarios |
 | `docs/` | Decisions, roadmap, spike records |
 
 ## Licence

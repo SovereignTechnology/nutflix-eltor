@@ -1,0 +1,19 @@
+[package]
+name = "nfe-eltor"
+description = "El Tor glue for nutflix-eltor: Foundation terms, the seeder marker, client plans, prices and pacing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+getrandom.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

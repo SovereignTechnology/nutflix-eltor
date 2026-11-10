@@ -74,11 +74,13 @@ Other facts that shape the design:
 
 ### 2. Discovery (all El Tor)
 
-- A seeder's ContactInfo carries a marker: `nutflix-eltor:v0 ck=<ed25519 catalog key>`. The descriptor is signed by
+- A seeder's ContactInfo carries a marker: `nutflix-eltor:v0 ck=<catalog key> port=<content port>` (format in
+  [ADR 0002](0002-catalog-v0.md); the key is BIP-340, the same kind as Nostr keys). The descriptor is signed by
   the relay, so the key is bound to the relay.
 - Viewers list seeders from the El Tor directory (full descriptors, which Foundation clients fetch anyway).
-- The catalog (titles, renditions, hash lists, terms summary) is signed with the catalog key and fetched over the
-  paid circuit to that seeder. The first paid minute is the cost of browsing.
+- The catalog (titles, renditions, hash-list roots; never prices, which are the relays' own signed terms) is signed
+  with the catalog key and fetched over the paid circuit to that seeder. The first paid minute is the cost of
+  browsing.
 - Later: a free catalog port (patch P1) lets browsing ride the free allowance, and a dedicated descriptor line
   (patch P5) replaces the ContactInfo marker.
 
