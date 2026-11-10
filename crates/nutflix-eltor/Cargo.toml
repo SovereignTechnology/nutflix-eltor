@@ -1,0 +1,22 @@
+[package]
+name = "nutflix-eltor"
+description = "nutflix-eltor: package, catalog, terms and serve (seed and watch come with the lab milestones)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+nfe-catalog.workspace = true
+nfe-eltor.workspace = true
+nfe-seed.workspace = true
+nfx-media.workspace = true
+nfx-proto.workspace = true
+getrandom.workspace = true
+hex.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

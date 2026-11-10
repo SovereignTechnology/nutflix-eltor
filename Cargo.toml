@@ -1,0 +1,32 @@
+[workspace]
+resolver = "3"
+members = ["crates/nfe-catalog", "crates/nfe-eltor", "crates/nfe-seed", "crates/nutflix-eltor"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.98"
+license = "AGPL-3.0-or-later"
+repository = "https://gitworkshop.dev/npub1s0vtechh66tx7vrwdud8zfyheu9zca7swwfrzd4qu2a4f93mxs6qvn9adx/nutflix-eltor"
+
+[workspace.dependencies]
+nfe-catalog = { path = "crates/nfe-catalog" }
+nfe-eltor = { path = "crates/nfe-eltor" }
+nfe-seed = { path = "crates/nfe-seed" }
+# NFX's wire formats and packager, pinned to a release tag (ADR 0001 section 3).
+nfx-proto = { git = "https://github.com/SovereignTechnology/nfx", tag = "v0.1.1" }
+nfx-media = { git = "https://github.com/SovereignTechnology/nfx", tag = "v0.1.1" }
+getrandom = "0.3"
+hex = "0.4.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.20"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+overflow-checks = true
