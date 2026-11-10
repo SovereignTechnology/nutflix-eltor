@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Seeder-side smoke test, no El Tor: package a generated clip, sign a catalog, serve it on loopback, then fetch
-# the catalog, the hash list, every playlist and every file over HTTP and check each against its sha256.
+# Seeder and viewer smoke test, no El Tor: package a generated clip, sign a catalog, serve it on loopback, fetch
+# the catalog, the hash list and every file over HTTP and check each against its sha256; then run `watch` (direct)
+# and decode the whole video through its local HLS proxy with ffmpeg, as a player would.
 # Needs ffmpeg, ffprobe, curl and a built `nutflix-eltor` (BIN, default target/debug/nutflix-eltor).
 # Runs in a test VM; never on a laptop (see CONTRIBUTING).
 set -euo pipefail
 
 BIN=${BIN:-target/debug/nutflix-eltor}
 W=$(mktemp -d)
-trap 'kill "${SERVE_PID:-0}" 2>/dev/null || true; rm -rf "$W"' EXIT
+trap 'kill "${SERVE_PID:-0}" "${WATCH_PID:-0}" 2>/dev/null || true; rm -rf "$W"' EXIT
 FP=ABCDEF0123456789ABCDEF0123456789ABCDEF01
 PORT=${PORT:-18443}
 
@@ -39,4 +40,16 @@ for f in $(python3 -I -c 'import json,sys; [print(f["sha256"]) for f in json.loa
 done
 code=$(curl -s --path-as-is -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/../$ROOT")
 [ "$code" = 404 ] || { echo "FAIL: traversal answered $code"; exit 1; }
-echo "PASS: catalog bound to $FP, hash list $ROOT, $n files fetched and verified"
+echo "origin: catalog bound to $FP, hash list $ROOT, $n files fetched and verified"
+
+"$BIN" watch --origin "127.0.0.1:$PORT" --direct yes --seeder "$FP" --contact "$CONTACT" \
+  --terms "$("$BIN" terms encode --rate-msat 1000 --bitrate 3000000)" > "$W/watch.url" 2> "$W/watch.log" &
+WATCH_PID=$!
+for _ in $(seq 100); do [ -s "$W/watch.url" ] && break; sleep 0.1; done
+URL=$(cat "$W/watch.url")
+case $URL in http://127.0.0.1:*/"$ROOT"/master.m3u8) ;; *) echo "FAIL: watch printed '$URL'"; cat "$W/watch.log"; exit 1 ;; esac
+ffmpeg -loglevel error -i "$URL" -f null - 2> "$W/decode.log" || { echo "FAIL: decode"; cat "$W/decode.log"; exit 1; }
+[ ! -s "$W/decode.log" ] || { echo "FAIL: decoder complained"; cat "$W/decode.log"; exit 1; }
+dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$URL")
+echo "watch: decoded the whole video through the local proxy (${dur}s)"
+echo "PASS"

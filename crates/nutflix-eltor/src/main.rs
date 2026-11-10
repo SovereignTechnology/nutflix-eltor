@@ -1,7 +1,8 @@
 //! nutflix-eltor: video over El Tor, paid per minute by the circuit itself (ADR 0001).
 //!
-//! The commands here need no El Tor network: packaging, keys, catalogs, terms, the seeder marker, prices and the
-//! content origin. `seed` and `watch` (which drive El Tor) arrive with milestones M1 and M2, in the lab.
+//! The commands here need no El Tor network of their own: packaging, keys, catalogs, terms, the seeder marker,
+//! prices, the content origin, and `watch`, which reaches a seeder through tor's SocksPort. Running tor with
+//! Foundation payment controllers (`seed`, and the viewer's plan) arrives with milestones M1 and M2, in the lab.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -31,7 +32,12 @@ nutflix-eltor <command> [options]
   price --terms HEX [--terms HEX ...] [--routing-fee-msat N] [--bitrate BPS] [--margin-permille N]
       Per-minute price and payload budget for a path (last hop last).
   serve --store DIR --catalog FILE [--listen 127.0.0.1:8443]
-      The seeder's content origin: /catalog.json and /<sha256>.
+      The seeder's content origin: /catalog.json and the NFX-05 section 6 file surface.
+  watch --origin IP:PORT (--socks ADDR [--socks-user U --socks-pass P] | --direct yes)
+        [--seeder FINGERPRINT --contact CONTACTINFO] [--video ADDR] [--terms HEX ...] [--listen 127.0.0.1:0]
+      Fetch and verify the seeder's catalog and a video's hash list, then serve a local HLS proxy for a player.
+      --terms (each hop's, last hop last) paces pulls under every quota. --direct skips tor: lab only, unpaid,
+      not anonymous.
 ";
 
 type Res<T> = Result<T, String>;
@@ -93,6 +99,7 @@ fn main() -> ExitCode {
         "marker" => cmd_marker(&a),
         "price" => cmd_price(&a),
         "serve" => cmd_serve(&a),
+        "watch" => cmd_watch(&a),
         "help" | "-h" | "--help" => {
             print!("{USAGE}");
             Ok(())
@@ -304,4 +311,72 @@ fn cmd_serve(a: &Args) -> Res<()> {
     let origin = nfe_seed::Origin::bind(listen, Path::new(a.req("store")?), catalog).map_err(|e| e.to_string())?;
     eprintln!("serving on {}", origin.local_addr().map_err(|e| e.to_string())?);
     origin.run().map_err(|e| e.to_string())
+}
+
+fn cmd_watch(a: &Args) -> Res<()> {
+    use nfe_watch::fetch::{Fetcher, Remote};
+    use nfe_watch::pacer::Pacer;
+    use nfe_watch::player::Player;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    a.check_known(&[
+        "origin",
+        "socks",
+        "socks-user",
+        "socks-pass",
+        "direct",
+        "seeder",
+        "contact",
+        "video",
+        "terms",
+        "listen",
+    ])?;
+    let origin = a.req("origin")?.parse().map_err(|_| "--origin: not IP:PORT (an IP literal, never a name)")?;
+    let socks = match (a.opt("socks")?, a.opt("direct")?) {
+        (Some(s), None) => Some(s.parse().map_err(|_| "--socks: not an address")?),
+        (None, Some("yes")) => {
+            eprintln!("warning: --direct skips tor: this connection is neither paid nor anonymous (lab only)");
+            None
+        }
+        _ => return Err("give --socks ADDR (tor's SocksPort) or --direct yes (lab only)".into()),
+    };
+    let socks_auth = match (a.opt("socks-user")?, a.opt("socks-pass")?) {
+        (Some(u), Some(p)) => Some((u.to_owned(), p.to_owned())),
+        (None, None) => None,
+        _ => return Err("--socks-user and --socks-pass go together".into()),
+    };
+    let path =
+        a.many("terms").iter().map(|h| Terms::decode(h)).collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    let budget = price::payload_budget_per_round(&path, 100);
+    match budget {
+        Some(b) => eprintln!("pacing: at most {b} payload bytes per 60 s round"),
+        None if path.is_empty() => eprintln!("pacing: off (no --terms given)"),
+        None => eprintln!("pacing: off (no hop sets a quota)"),
+    }
+    let remote = Remote { origin, socks, socks_auth, timeout: Duration::from_secs(60) };
+    let fetcher = Arc::new(Fetcher::new(remote, Pacer::new(budget)));
+    let catalog = fetcher.catalog(now()).map_err(|e| format!("catalog: {e}"))?;
+    match (a.opt("seeder")?, a.opt("contact")?) {
+        (Some(fp), Some(contact)) => {
+            let m = Marker::find(contact).ok_or("no nutflix-eltor marker in --contact")?.map_err(|e| e.to_string())?;
+            catalog.check_binding(fp, &m).map_err(|e| e.to_string())?;
+            if m.port != origin.port() {
+                return Err("--origin's port is not the marker's content port".into());
+            }
+        }
+        (None, None) => eprintln!("warning: catalog not bound to a relay (give --seeder and --contact)"),
+        _ => return Err("--seeder and --contact go together".into()),
+    }
+    let video = match a.opt("video")? {
+        Some(v) => catalog.videos.iter().find(|x| x.video == v).ok_or("no such video in the catalog")?,
+        None => catalog.videos.first().ok_or("the catalog is empty")?,
+    };
+    let (list, bytes) = fetcher.hash_list(video).map_err(|e| format!("hash list: {e}"))?;
+    let listen = a.opt("listen")?.unwrap_or("127.0.0.1:0").parse().map_err(|_| "--listen: not an address")?;
+    let server = Player::new(Arc::clone(&fetcher), &video.root, list, bytes).bind(listen).map_err(|e| e.to_string())?;
+    let local = server.local_addr().map_err(|e| e.to_string())?;
+    eprintln!("{}: {} ({} s)", video.video, video.title, video.duration_ms / 1000);
+    println!("http://{local}/{}/master.m3u8", video.root);
+    server.run().map_err(|e| e.to_string())
 }

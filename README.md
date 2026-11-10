@@ -24,9 +24,11 @@ Early. The architecture is in [ADR 0001](docs/decisions/0001-architecture.md), t
 
 Built so far, all without an El Tor network: packaging (NFX's `nfx-media`), catalog keys, signed catalogs and their
 binding to a relay, El Tor Foundation terms, the seeder's ContactInfo marker, client plans in eltord's format,
-per-minute prices and pacing budgets, and the seeder's content origin. `lab/smoke-seed.sh` packages a clip, signs a
-catalog, serves it and fetches every file back by hash. Driving El Tor itself (`seed`, `watch`) waits for M0's
-spikes in a local El Tor regtest lab.
+per-minute prices and pacing budgets, the seeder's content origin (the NFX-05 §6 surface, so NFX clients can read
+it), and the viewer: SOCKS5 to tor, paced and hash-checked fetching, and a localhost HLS proxy for any player.
+`lab/smoke-seed.sh` packages a clip, signs a catalog, serves it, fetches every file back by hash, then runs `watch`
+and decodes the whole video through its proxy. Running tor with El Tor's Foundation payment controllers (the
+seeder's relay, the viewer's paid circuit) waits for M0's spikes in a local El Tor regtest lab.
 
 El Tor itself is pre-1.0. Its newer paid-circuit mode ("Foundation") runs only on test-mode networks today, and
 paid onion services are specified but not implemented. nutflix-eltor targets that mode and tracks the patches it
@@ -55,9 +57,9 @@ viewer: nutflix-eltor watch ──SOCKS──▶ El Tor client (Foundation plan:
 |---|---|
 | `crates/nfe-catalog` | Catalog v0: format, BIP-340 signing, verification, binding to a relay |
 | `crates/nfe-eltor` | El Tor glue: Foundation terms, the seeder marker, client plans, prices and pacing |
-| `crates/nfe-seed` | Seeder: the content origin (relay controller and exit-to-self come in M1) |
-| `crates/nfe-watch` | Viewer (M2, not yet): payment controller, paced segment fetcher, local HLS |
-| `crates/nutflix-eltor` | The binary: `package`, `key`, `catalog`, `terms`, `marker`, `price`, `serve` (`seed`, `watch` later) |
+| `crates/nfe-seed` | Seeder: the content origin (NFX-05 §6 surface + catalog) on a small bounded HTTP server; relay controller and exit-to-self come in M1 |
+| `crates/nfe-watch` | Viewer: SOCKS5, strict GET client, per-round pacer, verified fetcher, local HLS proxy; the payment controller comes in M2 |
+| `crates/nutflix-eltor` | The binary: `package`, `key`, `catalog`, `terms`, `marker`, `price`, `serve`, `watch` |
 | `lab/` | Lab tools: terms encoder (Python), seeder smoke test, later the regtest scenarios |
 | `docs/` | Decisions, roadmap, spike records |
 
