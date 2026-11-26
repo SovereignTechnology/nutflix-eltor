@@ -1,8 +1,10 @@
 # Roadmap
 
+> Shelved on 2026-11-10 at M0 ([README](../README.md#status-2026-11-10)). Nothing below is scheduled.
+
 Every milestone is checked in a local El Tor regtest lab (bitcoind regtest, a Core Lightning node per relay,
-Chutney directory authorities and relays) on our own hosts. Hosted CI builds and runs unit tests only; it never runs
-a network. The architecture is [ADR 0001](decisions/0001-architecture.md).
+Chutney directory authorities and relays) on our own hosts. There is no hosted CI yet; if one is added, it builds and
+runs unit tests only and never runs a network. The architecture is [ADR 0001](decisions/0001-architecture.md).
 
 | Milestone | What | Done when |
 |---|---|---|
@@ -14,7 +16,7 @@ a network. The architecture is [ADR 0001](decisions/0001-architecture.md).
 | **M5** long play | Patch P3 (successive scopes), or long terms | A 2-hour title plays continuously, and the payment events show its renewals |
 | **M6** real money | **Gate: the maintainers pick the network.** Either our own El Tor network (3 directory authorities, 3 relays and seeders, test mode, mainnet Lightning at about 1 sat per round) or signet first | A 10-minute watch settles, and the viewer's and seeder's ledgers reconcile with no uncertain payments |
 | **M7** desktop | A desktop app on eltor-app's pattern (Tauri, bundled tor, wallet setup) | A packaged app plays a lab title end to end |
-| later | nfxd compatibility ([#1](https://github.com/SovereignTechnology/nutflix-eltor/issues/1)) | nfxd fetches and verifies a nutflix-eltor video, and nutflix-eltor plays an nfxd-seeded one |
+| later | nutflixd compatibility (the NFX node, `nfxd` until its 0.1.5; [#1](https://github.com/SovereignTechnology/nutflix-eltor/issues/1)) | nutflixd fetches and verifies a nutflix-eltor video, and nutflix-eltor plays a nutflixd-seeded one |
 
 ## Patches to El Tor
 
