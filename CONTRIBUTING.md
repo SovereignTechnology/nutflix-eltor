@@ -1,5 +1,8 @@
 # Contributing to nutflix-eltor
 
+> nutflix-eltor was shelved on 2026-11-10 ([README](README.md#status-2026-11-10)). Issues are read; nothing is
+> being reviewed or merged until work resumes.
+
 Thanks for taking an interest. nutflix-eltor delivers video over paid El Tor circuits; start with the
 [README](README.md) and [ADR 0001](docs/decisions/0001-architecture.md).
 
@@ -18,5 +21,5 @@ Thanks for taking an interest. nutflix-eltor delivers video over paid El Tor cir
 2. A design change is an edit to an ADR in `docs/decisions/` before it is code.
 3. Branch off `main` and keep commits focused. Conventional Commits (`feat:`, `fix:`, `docs:` …).
 4. Network tests (anything that starts tor, Lightning or a lab) run on your own machine or ours, never on hosted CI
-   runners. Hosted CI builds and runs unit tests only.
+   runners. There is no hosted CI yet; if one is added, it builds and runs unit tests only.
 5. Open a pull request against `main`. Explain *why*, not just *what*.

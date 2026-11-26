@@ -3,6 +3,9 @@
 > **Source of truth:** [`nostr://npub1s0vtechh66tx7vrwdud8zfyheu9zca7swwfrzd4qu2a4f93mxs6qvn9adx/nutflix-eltor`](https://gitworkshop.dev/npub1s0vtechh66tx7vrwdud8zfyheu9zca7swwfrzd4qu2a4f93mxs6qvn9adx/nutflix-eltor).
 > Issues and pull requests live there. This GitHub repository is a mirror.
 
+> **Shelved on 2026-11-10.** Work is paused and nothing here is maintained. Where it stopped and where to
+> resume: [Status](#status-2026-11-10).
+
 Video over [El Tor](https://github.com/el-tor), paid per minute by the circuit itself.
 
 El Tor is a Tor fork whose clients pay every relay in their circuit over Lightning (BOLT12), one 60-second round at
@@ -12,17 +15,17 @@ minute it keeps watching. Serving data is the thing that gets paid, so there is 
 paying and the circuit, and the video, stop.
 
 nutflix-eltor is a deliberately small, new implementation in the nutflix/NFX family. It drops most of the
-[NFX](https://github.com/SovereignTechnology/nfx) standards stack (iroh transport, Nostr availability beacons, the
+[NFX](https://github.com/SovereignTechnology/nutflix) standards stack (iroh transport, Nostr availability beacons, the
 Cashu payment protocol) and uses El Tor for transport, payment and discovery. It keeps NFX-05's file layout
-(CMAF segments named by sha256, plus a hash list), so compatibility with `nfxd` can be added later as a bridge
+(CMAF segments named by sha256, plus a hash list), so compatibility with `nutflixd` (the NFX node, `nfxd` until its 0.1.5) can be added later as a bridge
 ([issue #1](https://github.com/SovereignTechnology/nutflix-eltor/issues/1)).
 
 ## Status (2026-11-10)
 
-**Shelved on 2026-11-10.** Resume at M0: the El Tor regtest lab is pinned (docs/spikes), and `lab/s1-exit-to-self.sh` is
-written but has not produced a verdict yet.
+**Shelved on 2026-11-10**, early in M0. To resume: the El Tor regtest lab is pinned (docs/spikes), and
+`lab/s1-exit-to-self.sh` is written but has not produced a verdict yet.
 
-Early. The architecture is in [ADR 0001](docs/decisions/0001-architecture.md), the catalog and seeder marker in
+What exists is early. The architecture is in [ADR 0001](docs/decisions/0001-architecture.md), the catalog and seeder marker in
 [ADR 0002](docs/decisions/0002-catalog-v0.md), and the milestones in [docs/roadmap.md](docs/roadmap.md).
 
 Built so far, all without an El Tor network: packaging (NFX's `nfx-media`), catalog keys, signed catalogs and their
@@ -63,7 +66,7 @@ viewer: nutflix-eltor watch ──SOCKS──▶ El Tor client (Foundation plan:
 | `crates/nfe-seed` | Seeder: the content origin (NFX-05 §6 surface + catalog) on a small bounded HTTP server; relay controller and exit-to-self come in M1 |
 | `crates/nfe-watch` | Viewer: SOCKS5, strict GET client, per-round pacer, verified fetcher, local HLS proxy; the payment controller comes in M2 |
 | `crates/nutflix-eltor` | The binary: `package`, `key`, `catalog`, `terms`, `marker`, `price`, `serve`, `watch` |
-| `lab/` | Lab tools: terms encoder (Python), seeder smoke test, later the regtest scenarios |
+| `lab/` | Lab tools: terms encoder (Python) and its tests, seeder smoke test, the S1 exit-to-self spike script (not yet run to a verdict); the other regtest scenarios are not written |
 | `docs/` | Decisions, roadmap, spike records |
 
 ## Licence

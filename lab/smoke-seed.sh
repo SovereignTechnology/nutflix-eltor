@@ -3,7 +3,7 @@
 # the catalog, the hash list and every file over HTTP and check each against its sha256; then run `watch` (direct)
 # and decode the whole video through its local HLS proxy with ffmpeg, as a player would.
 # Needs ffmpeg, ffprobe, curl and a built `nutflix-eltor` (BIN, default target/debug/nutflix-eltor).
-# Runs in a test VM; never on a laptop (see CONTRIBUTING).
+# Runs in a test VM; never on a laptop.
 set -euo pipefail
 
 BIN=${BIN:-target/debug/nutflix-eltor}
